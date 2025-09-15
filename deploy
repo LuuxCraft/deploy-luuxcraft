@@ -6,7 +6,8 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-API_KEY="$1"
+USER_GITHUB="$1"
+API_KEY="$2"
 
 REAL_USER="${SUDO_USER:-$(logname)}"
 USER_HOME="/home/$REAL_USER"
@@ -30,8 +31,8 @@ if ! command -v docker >/dev/null 2>&1; then
   echo "✅ Docker installé (pense à te reconnecter pour que le groupe 'docker' s'applique)."
 fi
 
-echo "🔑 Connexion à ghcr.io en tant que 'luuxis'…"
-echo "$API_KEY" | docker login ghcr.io -u luuxis --password-stdin
+echo "🔑 Connexion à ghcr.io en tant que '$USER_GITHUB'…"
+echo "$API_KEY" | docker login ghcr.io -u "$USER_GITHUB" --password-stdin
 echo "✅ Connexion GHCR réussie."
 
 printf "🌐 Domaine principal (ex: example.com) : "
