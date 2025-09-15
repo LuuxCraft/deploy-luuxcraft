@@ -1,1 +1,253 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+if [ $# -lt 1 ]; then
+  echo "❌ Utilisation: sudo $0 <GITHUB_API_KEY>"
+  exit 1
+fi
+
+API_KEY="$1"
+
+REAL_USER="${SUDO_USER:-$(logname)}"
+USER_HOME="/home/$REAL_USER"
+BASE_DIR="$USER_HOME/deploy-luuxcraft"
+
+CADDY_DIR="$BASE_DIR/etc/caddy"
+DATA_DIR="$BASE_DIR/data/caddy"
+CONFIG_DIR="$BASE_DIR/config/caddy"
+LOGS_DIR="$BASE_DIR/logs"
+PROD_DIR="$BASE_DIR/production"
+STAGING_DIR="$BASE_DIR/staging"
+
+mkdir -p "$CADDY_DIR" "$DATA_DIR" "$CONFIG_DIR" "$LOGS_DIR" "$PROD_DIR/data" "$STAGING_DIR/data"
+chown -R "$REAL_USER":"$REAL_USER" "$BASE_DIR"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "🐳 Docker n'est pas installé. Installation en cours..."
+  curl -fsSL https://get.docker.com | sh
+  systemctl enable --now docker
+  usermod -aG docker "$REAL_USER"
+  echo "✅ Docker installé (pense à te reconnecter pour que le groupe 'docker' s'applique)."
+fi
+
+echo "🔑 Connexion à ghcr.io en tant que 'luuxis'…"
+echo "$API_KEY" | docker login ghcr.io -u luuxis --password-stdin
+echo "✅ Connexion GHCR réussie."
+
+printf "🌐 Domaine principal (ex: example.com) : "
+IFS= read -r HOST
+TRIMMED_HOST="$(printf '%s' "$HOST" | tr -d '[:space:]')"
+if [ -z "$TRIMMED_HOST" ]; then
+  echo "❌ Domaine invalide."
+  exit 1
+fi
+if ! printf '%s' "$TRIMMED_HOST" | grep -Eq '^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'; then
+  echo "❌ Domaine invalide (format)."
+  exit 1
+fi
+HOST="$TRIMMED_HOST"
+
+echo "✉️  Configuration SMTP (laisser vide pour la valeur par défaut entre crochets)"
+read -rp "MAIL_HOST [smtp.example.com]: " MAIL_HOST
+MAIL_HOST="${MAIL_HOST:-smtp.example.com}"
+
+read -rp "MAIL_PORT [587]: " MAIL_PORT
+MAIL_PORT="${MAIL_PORT:-587}"
+if ! printf '%s' "$MAIL_PORT" | grep -Eq '^[0-9]+$'; then
+  echo "❌ MAIL_PORT doit être numérique."
+  exit 1
+fi
+
+read -rp "MAIL_USER [noreply@$HOST]: " MAIL_USER
+MAIL_USER="${MAIL_USER:-noreply@$HOST}"
+
+read -rp "MAIL_FROM [$MAIL_USER]: " MAIL_FROM
+MAIL_FROM="${MAIL_FROM:-$MAIL_USER}"
+
+# Saisie masquée du mot de passe
+read -srp "MAIL_PASSWORD (saisi masquée): " MAIL_PASSWORD
+echo ""
+
+read -rp "Sécurité (none|starttls|tls) [starttls]: " MAIL_SECURITY
+MAIL_SECURITY="${MAIL_SECURITY:-starttls}"
+case "$MAIL_SECURITY" in
+  none|starttls|tls) ;;
+  *) echo "❌ Valeur invalide pour sécurité SMTP."; exit 1 ;;
+esac
+
+# ── Générer le Caddyfile
+CADDYFILE_PATH="$CADDY_DIR/Caddyfile"
+cat > "$CADDYFILE_PATH" <<EOF
+$HOST {
+    reverse_proxy node_production:8080
+
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        Cache-Control "no-store"
+    }
+
+    log {
+        output file /var/log/caddy/luuxcraft_access.log
+        level WARN
+    }
+}
+
+staging.$HOST {
+    reverse_proxy node_staging:8080
+
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        Cache-Control "no-store"
+    }
+
+    log {
+        output file /var/log/caddy/staging_access.log
+        level WARN
+    }
+}
+EOF
+
+chown "$REAL_USER":"$REAL_USER" "$CADDYFILE_PATH"
+echo "📄 Caddyfile généré: $CADDYFILE_PATH"
+
+json_escape() {
+  printf '%s' "$1" \
+    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a;N;$!ba;s/\n/\\n/g'
+}
+
+MAIL_HOST_J=$(json_escape "$MAIL_HOST")
+MAIL_PORT_J=$(json_escape "$MAIL_PORT")
+MAIL_USER_J=$(json_escape "$MAIL_USER")
+MAIL_FROM_J=$(json_escape "$MAIL_FROM")
+MAIL_PASS_J=$(json_escape "$MAIL_PASSWORD")
+MAIL_SEC_J=$(json_escape "$MAIL_SECURITY")
+
+PROD_ENV_PATH="$PROD_DIR/env.json"
+STAGING_ENV_PATH="$STAGING_DIR/env.json"
+
+cat > "$PROD_ENV_PATH" <<EOF
+{
+  "production": {
+    "IP_ACCESS": "node_production",
+    "NODE_ENV": "production"
+  },
+  "mail": {
+    "MAIL_USER": "$MAIL_USER_J",
+    "MAIL_FROM": "$MAIL_FROM_J",
+    "MAIL_PASSWORD": "$MAIL_PASS_J",
+    "MAIL_HOST": "$MAIL_HOST_J",
+    "MAIL_PORT": "$MAIL_PORT_J",
+    "MAIL_SECURITY": "$MAIL_SEC_J"
+  },
+  "global": {
+    "PORT": "8080",
+    "OBFUSCATE": "true"
+  }
+}
+EOF
+
+cat > "$STAGING_ENV_PATH" <<EOF
+{
+  "staging": {
+    "IP_ACCESS": "node_staging",
+    "NODE_ENV": "production"
+  },
+  "mail": {
+    "MAIL_USER": "$MAIL_USER_J",
+    "MAIL_FROM": "$MAIL_FROM_J",
+    "MAIL_PASSWORD": "$MAIL_PASS_J",
+    "MAIL_HOST": "$MAIL_HOST_J",
+    "MAIL_PORT": "$MAIL_PORT_J",
+    "MAIL_SECURITY": "$MAIL_SEC_J"
+  },
+  "global": {
+    "PORT": "8080",
+    "OBFUSCATE": "true"
+  }
+}
+EOF
+
+chown "$REAL_USER":"$REAL_USER" "$PROD_ENV_PATH" "$STAGING_ENV_PATH"
+echo "📄 Fichiers SMTP écrits :"
+echo "   - $PROD_ENV_PATH"
+echo "   - $STAGING_ENV_PATH"
+
+DOCKER_COMPOSE_PATH="$BASE_DIR/docker-compose.yml"
+DOCKERFILE_PATH="$BASE_DIR/Dockerfile"
+
+cat > "$DOCKER_COMPOSE_PATH" <<'EOF'
+services:
+  node_production:
+    image: ghcr.io/luuxcraft/node-app:latest
+    restart: always
+    container_name: node_production
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - ./production/env.json:/app/env.json:ro
+      - ./production/data:/app/data
+    command: ["npm", "start"]
+
+  node_staging:
+    image: ghcr.io/luuxcraft/node-app:staging
+    restart: always
+    container_name: node_staging
+    environment:
+      - NODE_ENV=staging
+    volumes:
+      - ./staging/env.json:/app/env.json:ro
+      - ./staging/data:/app/data
+    command: ["npm", "run", "staging"]
+
+  caddy:
+    image: caddy:latest
+    restart: always
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data
+      - ./config/caddy:/config
+      - ./logs:/var/log/caddy
+    depends_on:
+      - node_production
+      - node_staging
+EOF
+
+cat > "$DOCKERFILE_PATH" <<'EOF'
+FROM node:latest
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+RUN npm run build:css || true
+
+EXPOSE 8080
+EOF
+
+chown "$REAL_USER":"$REAL_USER" "$DOCKER_COMPOSE_PATH" "$DOCKERFILE_PATH"
+echo "📄 docker-compose.yml et Dockerfile créés dans $BASE_DIR"
+
+echo "🚀 Déploiement initial en cours..."
+cd "$BASE_DIR"
+sudo -u "$REAL_USER" docker compose up -d --build
+echo "✅ Services démarrés avec Docker Compose."
+
+echo "📌 N'oubliez pas de configurer vos DNS :"
+echo "    - $HOST -> IP du serveur"
+echo "    - staging.$HOST -> IP du serveur"
