@@ -80,7 +80,7 @@ esac
 CADDYFILE_PATH="$CADDY_DIR/Caddyfile"
 cat > "$CADDYFILE_PATH" <<EOF
 $HOST {
-    reverse_proxy node_production:8080
+    reverse_proxy production:8080
 
     encode zstd gzip
     header {
@@ -99,7 +99,7 @@ $HOST {
 }
 
 staging.$HOST {
-    reverse_proxy node_staging:8080
+    reverse_proxy staging:8080
 
     encode zstd gzip
     header {
@@ -139,7 +139,7 @@ STAGING_ENV_PATH="$STAGING_DIR/env.json"
 cat > "$PROD_ENV_PATH" <<EOF
 {
   "production": {
-    "IP_ACCESS": "node_production",
+    "IP_ACCESS": "production",
     "NODE_ENV": "production"
   },
   "mail": {
@@ -160,7 +160,7 @@ EOF
 cat > "$STAGING_ENV_PATH" <<EOF
 {
   "staging": {
-    "IP_ACCESS": "node_staging",
+    "IP_ACCESS": "staging",
     "NODE_ENV": "production"
   },
   "mail": {
@@ -188,10 +188,10 @@ DOCKERFILE_PATH="$BASE_DIR/Dockerfile"
 
 cat > "$DOCKER_COMPOSE_PATH" <<'EOF'
 services:
-  node_production:
-    image: ghcr.io/luuxcraft/node-app:latest
+  production:
+    image: ghcr.io/luuxcraft/luuxcraft-panel:latest
     restart: always
-    container_name: node_production
+    container_name: production
     environment:
       - NODE_ENV=production
     volumes:
@@ -199,10 +199,10 @@ services:
       - ./production/data:/app/data
     command: ["npm", "start"]
 
-  node_staging:
-    image: ghcr.io/luuxcraft/node-app:staging
+  staging:
+    image: ghcr.io/luuxcraft/luuxcraft-panel:staging
     restart: always
-    container_name: node_staging
+    container_name: staging
     environment:
       - NODE_ENV=staging
     volumes:
@@ -223,8 +223,8 @@ services:
       - ./config/caddy:/config
       - ./logs:/var/log/caddy
     depends_on:
-      - node_production
-      - node_staging
+      - production
+      - staging
 EOF
 
 cat > "$DOCKERFILE_PATH" <<'EOF'

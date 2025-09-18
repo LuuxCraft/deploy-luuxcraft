@@ -66,8 +66,8 @@ curl -fsSL https://raw.githubusercontent.com/LuuxCraft/deploy-luuxcraft/refs/hea
 
    Avec les entrées suivantes :
 
-   * `example.com` → proxy vers `node_production:8080`
-   * `staging.example.com` → proxy vers `node_staging:8080`
+   * `example.com` → proxy vers `production:8080`
+   * `staging.example.com` → proxy vers `staging:8080`
 
 5. **Mise en place de Caddy**
 
@@ -81,8 +81,8 @@ curl -fsSL https://raw.githubusercontent.com/LuuxCraft/deploy-luuxcraft/refs/hea
    Exemple :
 
    ```bash
-   docker network connect luuxcraft node_production
-   docker network connect luuxcraft node_staging
+   docker network connect luuxcraft production
+   docker network connect luuxcraft staging
    ```
 
 ---
@@ -117,8 +117,8 @@ luuxcraft.fr
 
 👉 Résultat :
 
-* `https://luuxcraft.fr` redirige vers `node_production:8080`
-* `https://staging.luuxcraft.fr` redirige vers `node_staging:8080`
+* `https://luuxcraft.fr` redirige vers `production:8080`
+* `https://staging.luuxcraft.fr` redirige vers `staging:8080`
 
 ---
 
