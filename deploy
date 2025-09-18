@@ -8,6 +8,7 @@ fi
 
 USER_GITHUB="$1"
 API_KEY="$2"
+HOST="$3"
 
 REAL_USER="${SUDO_USER:-$(logname)}"
 USER_HOME="/home/$REAL_USER"
@@ -34,19 +35,6 @@ fi
 echo "🔑 Connexion à ghcr.io en tant que '$USER_GITHUB'…"
 echo "$API_KEY" | docker login ghcr.io -u "$USER_GITHUB" --password-stdin
 echo "✅ Connexion GHCR réussie."
-
-printf "🌐 Domaine principal (ex: example.com) : "
-IFS= read -r HOST
-TRIMMED_HOST="$(printf '%s' "$HOST" | tr -d '[:space:]')"
-if [ -z "$TRIMMED_HOST" ]; then
-  echo "❌ Domaine invalide."
-  exit 1
-fi
-if ! printf '%s' "$TRIMMED_HOST" | grep -Eq '^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'; then
-  echo "❌ Domaine invalide (format)."
-  exit 1
-fi
-HOST="$TRIMMED_HOST"
 
 echo "✉️  Configuration SMTP (laisser vide pour la valeur par défaut entre crochets)"
 read -rp "MAIL_HOST [smtp.example.com]: " MAIL_HOST
